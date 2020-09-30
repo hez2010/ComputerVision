@@ -1,0 +1,7 @@
+out/
+.vs/
+.vscode/
+*.obj
+*.exe
+*.out
+*.zip
