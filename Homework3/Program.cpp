@@ -44,8 +44,6 @@ int main(int argc, char** argv)
         card.draw_line(i);
     }
 
-    card.get().display();
-
     // (两条直线的编号, 两条直线的交点)[]
     auto cpoints = std::vector<std::pair<std::pair<int, int>, std::pair<int, int>>>();
 
