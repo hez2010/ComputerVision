@@ -5,7 +5,7 @@
 #include "UFS.h"
 #include "Transform.h"
 
-const int kAngleSplits = 720;
+const int kAngleSplits = 1024;
 
 int main(int argc, char** argv) {
     if (argc <= 1) {
@@ -78,7 +78,7 @@ int main(int argc, char** argv) {
         });
 
     for (auto& i : corners) {
-        printf("[Info] Found corner: (%lf, %lf)\n", i.first, i.second);
+        printf("[Info] Found candidate corner: (%lf, %lf)\n", i.first, i.second);
     }
 
     if (corners.size() < 4) {
@@ -86,16 +86,20 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    printf("[Info] Processing perspective transform...\n");
-
     vector<Point> sorted_corners = {};
     for (int i = 0; i < 4; i++) {
         sorted_corners.push_back(corners[i]);
     }
 
-    sort(sorted_corners.begin(), sorted_corners.end(), [](Point& a, Point& b) -> bool {
-        return a.first * a.second < b.first* b.second;
+    sort(sorted_corners.begin(), sorted_corners.end(), [w, h](Point& a, Point& b) -> bool {
+        return a.first + a.second < b.first + b.second;
         });
+
+    for (auto& i : sorted_corners) {
+        printf("[Info] Filtered corner: (%lf, %lf)\n", i.first, i.second);
+    }
+
+    printf("[Info] Processing perspective transform...\n");
 
     auto transformed = Transform::perspective_transform(
         image,
