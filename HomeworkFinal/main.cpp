@@ -12,14 +12,15 @@ int main(int argc, char** argv) {
         printf("Usage: classifier.exe image\n");
         return 0;
     }
-    Hough hough(kAngleSplits);
     printf("[Info] Load image: %s...\n", *(argv + 1));
-    CImg<u8> image = CImg<u8>(*(argv + 1));
+    CImg<u8> image = CImg<u8>(*(argv + 1)).resize(600, 800);
     printf("[Info] Processing canny detection...\n");
     Canny canny;
     auto contours = canny.detect(image, 1, 50, 80);
 
     printf("[Info] Processing hough detection...\n");
+
+    Hough hough(kAngleSplits);
     int w = contours.width(), h = contours.height();
     auto result = hough.detect(contours, min(w, h) / 3);
 
