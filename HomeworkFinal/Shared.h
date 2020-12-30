@@ -8,6 +8,8 @@
 #include <vector>
 #include <tuple>
 #include <unordered_map>
+#include <queue>
+#include <map>
 
 using namespace std;
 using namespace cimg_library;
