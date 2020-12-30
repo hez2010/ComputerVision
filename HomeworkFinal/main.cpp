@@ -6,11 +6,12 @@
 #include "Transform.h"
 #include <svm.h>
 
-#define DISPLAY_FEATURE 0
+#define DISPLAY_FEATURE 1
 
 const int kAngleSplits = 1024;
 #if DISPLAY_FEATURE
-CImgDisplay disp(64, 64, "feature", 3, false, true);
+CImgDisplay disp1(64, 64, "image", 3, false, true);
+CImgDisplay disp2(64, 64, "feature", 3, false, true);
 #endif
 
 int predict(CImg<u8> input, svm_model* model) {
@@ -53,7 +54,7 @@ int predict(CImg<u8> input, svm_model* model) {
 
     for (int i = 0; i < image.width(); i++) {
         for (int j = 0; j < image.height(); j++) {
-            *image.data(i, j) = *image.data(i, j) >= kmax + 10 ? *image.data(i, j) + (255 - vmax) : 0;
+            *image.data(i, j) = *image.data(i, j) >= kmax + 10 ? min(255, *image.data(i, j) + (255 - vmax)) : 0;
         }
     }
 
@@ -72,10 +73,11 @@ int predict(CImg<u8> input, svm_model* model) {
         }
     }
 #if DISPLAY_FEATURE
-    feature.display(disp);
+    image.display(disp1);
+    feature.display(disp2);
     do {
-        disp.wait();
-    } while (!disp.is_keyENTER());
+        disp1.wait();
+    } while (!disp1.is_keyENTER());
 #endif
     node[size / 4].index = -1;
     u8 result = (u8)svm_predict(model, node);
@@ -167,7 +169,8 @@ int get_corner_type(Point& point, int w, int h) {
 
 int main(int argc, char** argv) {
 #if DISPLAY_FEATURE
-    disp.move(100, 100);
+    disp1.move(100, 100);
+    disp2.move(200, 100);
 #endif
     if (argc <= 2) {
         printf("Usage: classifier.exe image model\n");
@@ -315,7 +318,7 @@ int main(int argc, char** argv) {
     UFS digitsLines(digits.size());
     for (int i = 0; i < digits.size(); i++) {
         for (int j = 0; j < i; j++) {
-            if (abs(get<1>(digits[i]) - get<1>(digits[j])) <= 10) {
+            if (abs((get<1>(digits[i]) + get<3>(digits[i])) / 2 - (get<1>(digits[j]) + get<3>(digits[j])) / 2) <= 10) {
                 digitsLines.merge(i, j);
             }
         }
