@@ -8,7 +8,9 @@
 
 const int kAngleSplits = 1024;
 
-// CImgDisplay disp;
+#if DISPLAY_FEATURE
+CImgDisplay disp(64, 64, "feature", 3, false, true);
+#endif
 
 int predict(CImg<u8> input, svm_model* model) {
     constexpr int cols = 28, rows = 28;
@@ -21,35 +23,57 @@ int predict(CImg<u8> input, svm_model* model) {
     }
 
     double factor = max(input.width() / 24.0, input.height() / 24.0);
-    input = input.resize(input.width() / factor, input.height() / factor, input.depth(), input.spectrum(), 3);
+    input = input.resize(input.width() / factor * 1.5, input.height() / factor);
+
+    int dis[256];
+    memset(dis, 0, sizeof(dis));
+
     int offsetX = (rows - input.width()) / 2, offsetY = (cols - input.height()) / 2;
     for (int i = 0; i < input.width(); i++) {
         for (int j = 0; j < input.height(); j++) {
             int x = offsetX + i - 2, y = offsetY + j - 2;
-            if (x < 0 || y < 0 || x >= rows || x >= cols) continue;
+            if (x < 0 || y < 0 || x >= rows || y >= cols) continue;
             *image.data(x, y) = *input.data(i, j);
+            dis[*input.data(i, j)]++;
+        }
+    }
+    int maxGray = 0, kmax = 0, vmax = 0;
+    for (int i = 0; i < 256; i++) {
+        if (dis[i] > maxGray) {
+            maxGray = dis[i];
+            kmax = i;
+        }
+        if (dis[i] > 0) {
+            vmax = i;
+        }
+    }
+
+    for (int i = 0; i < image.width(); i++) {
+        for (int j = 0; j < image.height(); j++) {
+            *image.data(i, j) = *image.data(i, j) >= kmax + 10 ? *image.data(i, j) + (255 - vmax) : 0;
         }
     }
 
     CImg<u8> feature = CImg<u8>(14, 14);
 
     svm_node* node = new svm_node[size / 4 + 1];
-
     for (int i = 0; i < rows / 2; i++) {
         for (int j = 0; j < cols / 2; j++) {
             node[i * rows / 2 + j].index = i * rows / 2 + j + 1;
-            auto value = (*image.data(i * 2, j * 2) +
-                *image.data(i * 2, j * 2 + 1) +
-                *image.data(i * 2 + 1, j * 2) +
-                *image.data(i * 2 + 1, j * 2 + 1)) / 4;
+            auto value = max(max(max(*image.data(i * 2, j * 2),
+                *image.data(i * 2, j * 2 + 1)),
+                *image.data(i * 2 + 1, j * 2)),
+                *image.data(i * 2 + 1, j * 2 + 1)) >= 100 ? 1 : 0;
             node[i * rows / 2 + j].value = value;
-            *feature.data(i, j) = node[i * rows / 2 + j].value;
+            *feature.data(i, j) = value ? 255 : 0;
         }
     }
-    /*feature.display(disp);
+#if DISPLAY_FEATURE
+    feature.display(disp);
     do {
         disp.wait();
-    } while (!disp.is_keyENTER());*/
+    } while (!disp.is_keyENTER());
+#endif
     node[size / 4].index = -1;
     u8 result = (u8)svm_predict(model, node);
     delete[] node;
@@ -119,8 +143,29 @@ vector<vector<pair<int, int>>> find_regions(CImg<u8> img) {
     return result;
 }
 
+int get_corner_type(Point& point, int w, int h) {
+    double diss[] = {
+        pow(point.first, 2) + pow(point.second, 2),
+        pow(point.first, 2) + pow(point.second - h, 2),
+        pow(point.first - w, 2) + pow(point.second, 2),
+        pow(point.first - w, 2) + pow(point.second - h, 2)
+    };
+
+    int k = 0, minv = diss[0];
+    for (int i = 0; i < 4; i++) {
+        if (minv > diss[i]) {
+            minv = diss[i];
+            k = i;
+        }
+    }
+
+    return k;
+}
+
 int main(int argc, char** argv) {
-    // disp.show();
+#if DISPLAY_FEATURE
+    disp.move(100, 100);
+#endif
     if (argc <= 2) {
         printf("Usage: classifier.exe image model\n");
         return 0;
@@ -199,21 +244,26 @@ int main(int argc, char** argv) {
         printf("[Info] Found candidate corner: (%lf, %lf)\n", i.first, i.second);
     }
 
-    if (corners.size() < 4) {
+    bool cornerMatched[] = { false,false,false,false };
+    vector<Point> sortedCorners = {};
+    for (auto& i : corners) {
+        auto type = get_corner_type(i, w, h);
+        if (!cornerMatched[type]) {
+            sortedCorners.push_back(i);
+            cornerMatched[type] = true;
+        }
+    }
+
+    if (sortedCorners.size() < 4) {
         printf("[Error] Cannot find enough corners\n");
         return 0;
     }
 
-    vector<Point> sorted_corners = {};
-    for (int i = 0; i < 4; i++) {
-        sorted_corners.push_back(corners[i]);
-    }
-
-    sort(sorted_corners.begin(), sorted_corners.end(), [w, h](Point& a, Point& b) -> bool {
+    sort(sortedCorners.begin(), sortedCorners.end(), [w, h](Point& a, Point& b) -> bool {
         return a.first + a.second < b.first + b.second;
         });
 
-    for (auto& i : sorted_corners) {
+    for (auto& i : sortedCorners) {
         printf("[Info] Filtered and sorted corner: (%lf, %lf)\n", i.first, i.second);
     }
 
@@ -222,16 +272,16 @@ int main(int argc, char** argv) {
     auto transformed = Transform::perspective_transform(
         image,
         std::make_tuple(
-            sorted_corners[0],
-            sorted_corners[1].first < sorted_corners[2].first ? sorted_corners[1] : sorted_corners[2],
-            sorted_corners[1].first < sorted_corners[2].first ? sorted_corners[2] : sorted_corners[1],
-            sorted_corners[3]
+            sortedCorners[0],
+            sortedCorners[1].first < sortedCorners[2].first ? sortedCorners[1] : sortedCorners[2],
+            sortedCorners[1].first < sortedCorners[2].first ? sortedCorners[2] : sortedCorners[1],
+            sortedCorners[3]
         ),
         std::make_tuple(
             std::make_pair(0, 0),
-            std::make_pair(0, sorted_corners[3].second - sorted_corners[0].second),
-            std::make_pair(sorted_corners[3].first - sorted_corners[0].first, 0),
-            std::make_pair(sorted_corners[3].first - sorted_corners[0].first, sorted_corners[3].second - sorted_corners[0].second)
+            std::make_pair(0, sortedCorners[3].second - sortedCorners[0].second),
+            std::make_pair(sortedCorners[3].first - sortedCorners[0].first, 0),
+            std::make_pair(sortedCorners[3].first - sortedCorners[0].first, sortedCorners[3].second - sortedCorners[0].second)
         )
     );
 
@@ -277,7 +327,7 @@ int main(int argc, char** argv) {
 
     printf("[Info] Processing number prediction...\n");
 
-    CImg<u8> predicted = CImg<u8>(processed.dilate(2));
+    CImg<u8> predicted = CImg<u8>(processed);
     char* text = new char[10];
 
     for (auto& i : groupedDigits) {
