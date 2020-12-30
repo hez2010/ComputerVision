@@ -287,7 +287,7 @@ int main(int argc, char** argv) {
 
     printf("[Info] Processing regions detection...\n");
 
-    CImg<u8> processed = Utils::rect(Utils::inverse(Utils::luminance(transformed)), 20, 20, 20, 20);
+    CImg<u8> processed = Utils::rect(Utils::inverse(Utils::luminance(transformed)), 10, 10, 10, 10);
 
     auto contours2 = canny.detect(processed, 1, 50, 80).dilate(1, 8);
     const unsigned char color[] = { 255 };
@@ -301,7 +301,8 @@ int main(int argc, char** argv) {
             maxX = max(maxX, j.first);
             maxY = max(maxY, j.second);
         }
-        if ((maxY - minY) * (maxX - minX) < 20) continue;
+        auto area = (maxY - minY) * (maxX - minX);
+        if (area < 20 || area > 1600) continue;
         printf("[Info] Located bounding box: (%d, %d, %d, %d)\n", minX, minY, maxX, maxY);
         digits.push_back(make_tuple(minX, minY, maxX, maxY));
     }
