@@ -6,8 +6,9 @@
 #include "Transform.h"
 #include <svm.h>
 
-const int kAngleSplits = 1024;
+#define DISPLAY_FEATURE 0
 
+const int kAngleSplits = 1024;
 #if DISPLAY_FEATURE
 CImgDisplay disp(64, 64, "feature", 3, false, true);
 #endif
@@ -25,8 +26,7 @@ int predict(CImg<u8> input, svm_model* model) {
     double factor = max(input.width() / 24.0, input.height() / 24.0);
     input = input.resize(input.width() / factor * 1.5, input.height() / factor);
 
-    int dis[256];
-    memset(dis, 0, sizeof(dis));
+    map<int, int> dis = {};
 
     int offsetX = (rows - input.width()) / 2, offsetY = (cols - input.height()) / 2;
     for (int i = 0; i < input.width(); i++) {
@@ -37,14 +37,17 @@ int predict(CImg<u8> input, svm_model* model) {
             dis[*input.data(i, j)]++;
         }
     }
-    int maxGray = 0, kmax = 0, vmax = 0;
-    for (int i = 0; i < 256; i++) {
-        if (dis[i] > maxGray) {
-            maxGray = dis[i];
-            kmax = i;
+    int maxGray = 0, kmax = 0, vmax = 0, ksplit = 0, cnt = 0;
+    for (auto& i : dis) {
+        if (i.second > maxGray) {
+            maxGray = i.second;
+            kmax = i.first;
         }
-        if (dis[i] > 0) {
-            vmax = i;
+        if (i.second > 0) {
+            vmax = i.first;
+        }
+        if (cnt++ == dis.size() / 2) {
+            ksplit = i.first;
         }
     }
 
@@ -63,7 +66,7 @@ int predict(CImg<u8> input, svm_model* model) {
             auto value = max(max(max(*image.data(i * 2, j * 2),
                 *image.data(i * 2, j * 2 + 1)),
                 *image.data(i * 2 + 1, j * 2)),
-                *image.data(i * 2 + 1, j * 2 + 1)) >= 100 ? 1 : 0;
+                *image.data(i * 2 + 1, j * 2 + 1)) >= ksplit ? 1 : 0;
             node[i * rows / 2 + j].value = value;
             *feature.data(i, j) = value ? 255 : 0;
         }
@@ -82,8 +85,8 @@ int predict(CImg<u8> input, svm_model* model) {
 
 int count_region(CImg<u8>& img, int x, int y) {
     int result = 0;
-    for (int i = -1; i <= 1; i++) {
-        for (int j = -1; j <= 1; j++) {
+    for (int i = 0; i <= 1; i++) {
+        for (int j = 0; j <= 1; j++) {
             if (*img.data(x + i, y + j) > 0) result++;
         }
     }
@@ -105,7 +108,7 @@ vector<pair<int, int>> get_region(CImg<u8>& img, CImg<bool>& map, int x, int y) 
         result.push_back(f);
         for (int i = 0; i < 4; i++) {
             int fx = f.first + dx[i], fy = f.second + dy[i];
-            if (fx <= 0 || fx >= img.width() - 1 || fy <= 0 || fy >= img.height() - 1) continue;
+            if (fx < 0 || fx >= img.width() - 1 || fy < 0 || fy >= img.height() - 1) continue;
             if (!(*map.data(fx, fy)) && count_region(img, fx, fy)) {
                 *map.data(fx, fy) = true;
                 q.push(make_pair(fx, fy));
@@ -127,9 +130,9 @@ vector<vector<pair<int, int>>> find_regions(CImg<u8> img) {
         }
     }
 
-    for (int i = 1; i < img.width() - 1; i++) {
-        for (int j = 1; j < img.height() - 1; j++) {
-            if (count_region(clone, i, j) >= 6) {
+    for (int i = 0; i < img.width() - 1; i++) {
+        for (int j = 0; j < img.height() - 1; j++) {
+            if (count_region(clone, i, j) >= 2) {
                 auto region = get_region(clone, map, i, j);
                 if (region.size() > 0) {
                     for (auto& x : region) {
@@ -254,42 +257,44 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (sortedCorners.size() < 4) {
-        printf("[Error] Cannot find enough corners\n");
-        return 0;
+    CImg<u8> transformed;
+
+    if (sortedCorners.size() >= 4) {
+        sort(sortedCorners.begin(), sortedCorners.end(), [w, h](Point& a, Point& b) -> bool {
+            return a.first + a.second < b.first + b.second;
+            });
+
+        for (auto& i : sortedCorners) {
+            printf("[Info] Filtered and sorted corner: (%lf, %lf)\n", i.first, i.second);
+        }
+
+        printf("[Info] Processing perspective transform...\n");
+
+        transformed = Transform::perspective_transform(
+            image,
+            std::make_tuple(
+                sortedCorners[0],
+                sortedCorners[1].first < sortedCorners[2].first ? sortedCorners[1] : sortedCorners[2],
+                sortedCorners[1].first < sortedCorners[2].first ? sortedCorners[2] : sortedCorners[1],
+                sortedCorners[3]
+            ),
+            std::make_tuple(
+                std::make_pair(0, 0),
+                std::make_pair(0, sortedCorners[3].second - sortedCorners[0].second),
+                std::make_pair(sortedCorners[3].first - sortedCorners[0].first, 0),
+                std::make_pair(sortedCorners[3].first - sortedCorners[0].first, sortedCorners[3].second - sortedCorners[0].second)
+            )
+        );
     }
-
-    sort(sortedCorners.begin(), sortedCorners.end(), [w, h](Point& a, Point& b) -> bool {
-        return a.first + a.second < b.first + b.second;
-        });
-
-    for (auto& i : sortedCorners) {
-        printf("[Info] Filtered and sorted corner: (%lf, %lf)\n", i.first, i.second);
+    else {
+        transformed = CImg<u8>(image);
     }
-
-    printf("[Info] Processing perspective transform...\n");
-
-    auto transformed = Transform::perspective_transform(
-        image,
-        std::make_tuple(
-            sortedCorners[0],
-            sortedCorners[1].first < sortedCorners[2].first ? sortedCorners[1] : sortedCorners[2],
-            sortedCorners[1].first < sortedCorners[2].first ? sortedCorners[2] : sortedCorners[1],
-            sortedCorners[3]
-        ),
-        std::make_tuple(
-            std::make_pair(0, 0),
-            std::make_pair(0, sortedCorners[3].second - sortedCorners[0].second),
-            std::make_pair(sortedCorners[3].first - sortedCorners[0].first, 0),
-            std::make_pair(sortedCorners[3].first - sortedCorners[0].first, sortedCorners[3].second - sortedCorners[0].second)
-        )
-    );
 
     printf("[Info] Processing regions detection...\n");
 
     CImg<u8> processed = Utils::rect(Utils::inverse(Utils::luminance(transformed)), 10, 10, 10, 10);
 
-    auto contours2 = canny.detect(processed, 1, 50, 80).dilate(1, 8);
+    auto contours2 = canny.detect(processed, 1, 50, 80).dilate(1, 10);
     const unsigned char color[] = { 255 };
     auto regions = find_regions(contours2);
     vector<tuple<int, int, int, int>> digits = {};
@@ -302,7 +307,7 @@ int main(int argc, char** argv) {
             maxY = max(maxY, j.second);
         }
         auto area = (maxY - minY) * (maxX - minX);
-        if (area < 20 || area > 1600) continue;
+        if (area < 20 || area > 2500) continue;
         printf("[Info] Located bounding box: (%d, %d, %d, %d)\n", minX, minY, maxX, maxY);
         digits.push_back(make_tuple(minX, minY, maxX, maxY));
     }
@@ -310,7 +315,7 @@ int main(int argc, char** argv) {
     UFS digitsLines(digits.size());
     for (int i = 0; i < digits.size(); i++) {
         for (int j = 0; j < i; j++) {
-            if (abs(get<1>(digits[i]) - get<1>(digits[j])) < 20) {
+            if (abs(get<1>(digits[i]) - get<1>(digits[j])) <= 10) {
                 digitsLines.merge(i, j);
             }
         }
