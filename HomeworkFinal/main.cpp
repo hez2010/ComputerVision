@@ -14,6 +14,57 @@ CImgDisplay disp1(64, 64, "image", 3, false, true);
 CImgDisplay disp2(64, 64, "feature", 3, false, true);
 #endif
 
+// train new images, input processed (28 * 28 and enhanced) images and their labels
+void train(char* imageFiles[], u8 labels[], int length, char* modelFile) {
+    int cols = 28, rows = 28;
+    int size = cols * rows;
+
+    svm_parameter param = {};
+    param.C = 100;
+    param.gamma = 0.09;
+    param.coef0 = 1;
+    param.nu = 0.5;
+    param.p = 1;
+    param.degree = 10;
+    param.eps = 1e-3;
+    param.svm_type = C_SVC;
+    param.kernel_type = RBF;
+    param.cache_size = 512;
+
+    svm_problem prob = {};
+    prob.l = length;
+    prob.x = new svm_node * [prob.l];
+    prob.y = new double[prob.l];
+    for (int index = 0; index < length; index++) {
+        CImg<u8> image = CImg<u8>(imageFiles[index]).resize(28, 28);
+        u8 label = 0;
+
+        prob.x[index] = new svm_node[size / 4 + 1];
+        for (int i = 0; i < rows / 2; i++) {
+            for (int j = 0; j < cols / 2; j++) {
+                prob.x[index][i * rows / 2 + j].index = i * rows / 2 + j + 1;
+                prob.x[index][i * rows / 2 + j].value =
+                    (*image.data(i * 2, j * 2) +
+                        *image.data(i * 2, j * 2 + 1) +
+                        *image.data(i * 2 + 1, j * 2) +
+                        *image.data(i * 2 + 1, j * 2 + 1)) / 4
+                    >= 100 ? 1 : 0;
+            }
+        }
+        prob.x[index][size / 4].index = -1;
+        prob.y[index] = label;
+    }
+
+    svm_model* model = svm_train(&prob, &param);
+    svm_save_model(modelFile, model);
+
+    for (int i = 0; i < prob.l; i++) {
+        delete[] prob.x[i];
+    }
+    delete[] prob.x;
+    delete[] prob.y;
+}
+
 int predict(CImg<u8> input, svm_model* model) {
     constexpr int cols = 28, rows = 28;
     constexpr int size = cols * rows;
