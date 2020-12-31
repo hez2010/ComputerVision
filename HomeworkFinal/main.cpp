@@ -6,7 +6,7 @@
 #include "Transform.h"
 #include <svm.h>
 
-#define DISPLAY_FEATURE 1
+#define DISPLAY_FEATURE 0
 
 const int kAngleSplits = 1024;
 #if DISPLAY_FEATURE
@@ -25,19 +25,22 @@ int predict(CImg<u8> input, svm_model* model) {
     }
 
     double factor = max(input.width() / 24.0, input.height() / 24.0);
-    input = input.resize(input.width() / factor * 1.5, input.height() / factor);
+    input = input.resize(input.width() / factor * 1.4, input.height() / factor, input.depth(), input.spectrum(), 3);
 
     map<int, int> dis = {};
 
     int offsetX = (rows - input.width()) / 2, offsetY = (cols - input.height()) / 2;
-    for (int i = 0; i < input.width(); i++) {
-        for (int j = 0; j < input.height(); j++) {
+    for (int i = 2; i < input.width(); i++) {
+        for (int j = 2; j < input.height(); j++) {
             int x = offsetX + i - 2, y = offsetY + j - 2;
             if (x < 0 || y < 0 || x >= rows || y >= cols) continue;
             *image.data(x, y) = *input.data(i, j);
             dis[*input.data(i, j)]++;
         }
     }
+
+    image = image.rotate(5);
+
     int maxGray = 0, kmax = 0, vmax = 0, ksplit = 0, cnt = 0;
     for (auto& i : dis) {
         if (i.second > maxGray) {
@@ -47,14 +50,14 @@ int predict(CImg<u8> input, svm_model* model) {
         if (i.second > 0) {
             vmax = i.first;
         }
-        if (cnt++ == dis.size() / 2) {
+        if (cnt++ == dis.size() * 3 / 5) {
             ksplit = i.first;
         }
     }
 
     for (int i = 0; i < image.width(); i++) {
         for (int j = 0; j < image.height(); j++) {
-            *image.data(i, j) = *image.data(i, j) >= kmax + 10 ? min(255, *image.data(i, j) + (255 - vmax)) : 0;
+            *image.data(i, j) = *image.data(i, j) >= kmax + 10 ? *image.data(i, j) + 255 - vmax : 0;
         }
     }
 
@@ -68,6 +71,10 @@ int predict(CImg<u8> input, svm_model* model) {
                 *image.data(i * 2, j * 2 + 1)),
                 *image.data(i * 2 + 1, j * 2)),
                 *image.data(i * 2 + 1, j * 2 + 1)) >= ksplit ? 1 : 0;
+            /*auto value = (*image.data(i * 2, j * 2) +
+                *image.data(i * 2, j * 2 + 1) +
+                *image.data(i * 2 + 1, j * 2) +
+                *image.data(i * 2 + 1, j * 2 + 1)) / 4 >= ksplit ? 1 : 0;*/
             node[i * rows / 2 + j].value = value;
             *feature.data(i, j) = value ? 255 : 0;
         }
@@ -170,7 +177,7 @@ int get_corner_type(Point& point, int w, int h) {
 int main(int argc, char** argv) {
 #if DISPLAY_FEATURE
     disp1.move(100, 100);
-    disp2.move(200, 100);
+    disp2.move(250, 100);
 #endif
     if (argc <= 2) {
         printf("Usage: classifier.exe image model\n");
@@ -273,6 +280,9 @@ int main(int argc, char** argv) {
 
         printf("[Info] Processing perspective transform...\n");
 
+        double transformedWidth = sqrt(pow(sortedCorners[2].second - sortedCorners[0].second, 2) + pow(sortedCorners[2].first - sortedCorners[0].first, 2));
+        double transformedHeight = sqrt(pow(sortedCorners[3].second - sortedCorners[0].second, 2) + pow(sortedCorners[3].first - sortedCorners[0].first, 2));
+
         transformed = Transform::perspective_transform(
             image,
             std::make_tuple(
@@ -283,9 +293,9 @@ int main(int argc, char** argv) {
             ),
             std::make_tuple(
                 std::make_pair(0, 0),
-                std::make_pair(0, sortedCorners[3].second - sortedCorners[0].second),
-                std::make_pair(sortedCorners[3].first - sortedCorners[0].first, 0),
-                std::make_pair(sortedCorners[3].first - sortedCorners[0].first, sortedCorners[3].second - sortedCorners[0].second)
+                std::make_pair(0, transformedHeight),
+                std::make_pair(transformedWidth, 0),
+                std::make_pair(transformedWidth, transformedHeight)
             )
         );
     }
@@ -298,8 +308,10 @@ int main(int argc, char** argv) {
     CImg<u8> processed = Utils::rect(Utils::inverse(Utils::luminance(transformed)), 10, 10, 10, 10);
 
     auto contours2 = canny.detect(processed, 1, 50, 80).dilate(1, 10);
+
     const unsigned char color[] = { 255 };
     auto regions = find_regions(contours2);
+
     vector<tuple<int, int, int, int>> digits = {};
     for (auto& i : regions) {
         int minX = contours2.width() - 1, minY = contours2.height() - 1, maxX = 0, maxY = 0;
@@ -309,8 +321,8 @@ int main(int argc, char** argv) {
             maxX = max(maxX, j.first);
             maxY = max(maxY, j.second);
         }
-        auto area = (maxY - minY) * (maxX - minX);
-        if (area < 20 || area > 2500) continue;
+        auto chWidth = maxX - minX, chHeight = maxY - minY;
+        if (chWidth < 3 || chHeight < 3 || chWidth > 50 || chHeight > 50) continue;
         printf("[Info] Located bounding box: (%d, %d, %d, %d)\n", minX, minY, maxX, maxY);
         digits.push_back(make_tuple(minX, minY, maxX, maxY));
     }
@@ -346,7 +358,7 @@ int main(int argc, char** argv) {
             });
 
         for (auto& j : i.second) {
-            auto digitRect = Utils::rect(processed, get<0>(j), get<1>(j), processed.width() - get<2>(j), processed.height() - get<3>(j));
+            auto digitRect = Utils::rect(processed, get<0>(j), get<1>(j), processed.width() - get<2>(j) - 3, processed.height() - get<3>(j));
             auto predictResult = predict(digitRect, model);
             printf("%d", predictResult);
             memset(text, 0, 10 * sizeof(char));
