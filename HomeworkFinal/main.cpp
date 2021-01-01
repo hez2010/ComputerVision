@@ -37,7 +37,7 @@ void train(char* imageFiles[], u8 labels[], int length, char* modelFile) {
     prob.y = new double[prob.l];
     for (int index = 0; index < length; index++) {
         CImg<u8> image = CImg<u8>(imageFiles[index]).resize(28, 28);
-        u8 label = 0;
+        u8 label = labels[index];
 
         prob.x[index] = new svm_node[size / 4 + 1];
         for (int i = 0; i < rows / 2; i++) {
